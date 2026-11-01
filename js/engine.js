@@ -6,11 +6,17 @@ function fresh() {
     profile: null, nut: null, plan: null, e1: null, logs: {}, mods: {}, reports: [], weights: [],
     food: { days: {}, custom: [] },
     hero: { xp: 0, streak: 0, best: 0, lastDay: null, freeze: 1, unlocked: {}, badges: {}, quests: {}, prs: {}, sets: 0, sessions: 0, weeksDone: 0, bossWon: {} },
-    set: { key: '' }, ui: { tab: 'home' },
+    set: { key: '' }, ui: { tab: 'home' }, sync: { token: '', gistId: '', base: 0 }, mod: 0, coach: { msgs: [] },
   };
 }
 let S = (() => { try { const r = JSON.parse(localStorage.getItem(KEY)); if (r) return Object.assign(fresh(), r); } catch (e) { } return fresh(); })();
-function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } }
+// Sync-relevanter Stand (ohne Geräte-Einstellungen/UI); mod = Zeitstempel der letzten echten Änderung
+const syncJson = () => JSON.stringify(S, (k, v) => (k === 'ui' || k === 'set' || k === 'sync' || k === 'mod') ? undefined : v);
+let _lp = syncJson();
+function save(keep) {
+  if (!keep) { const p = syncJson(); if (p !== _lp) { _lp = p; S.mod = Date.now(); if (typeof scheduleSync === 'function') scheduleSync(); } }
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { }
+}
 
 // ---------- Helpers ----------
 const dkey = d => { d = new Date(d); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };

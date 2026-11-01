@@ -5,6 +5,14 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 const getP = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
 const setP = (o, p, v) => { const ks = p.split('.'); const l = ks.pop(); ks.reduce((a, k) => a[k], o)[l] = v; };
 const DAYN = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+// Wochentag + Datum einer Einheit (Tag 1..n werden den gewählten Trainingstagen Mo→So zugeordnet)
+function sessDate(w, s) {
+  const days = S.profile.days.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)), d = days[s % days.length];
+  const st = new Date(S.plan.start + 'T12:00:00'), dt = new Date(st);
+  dt.setDate(st.getDate() - ((st.getDay() + 6) % 7) + 7 * (w - 1) + ((d + 6) % 7));
+  return { k: dkey(dt), txt: `${DAYN[d]} ${String(dt.getDate()).padStart(2, '0')}.${String(dt.getMonth() + 1).padStart(2, '0')}.` };
+}
+const sdl = (w, s) => { const x = sessDate(w, s); return x.txt + (x.k === todayK() ? ' (heute)' : ''); };
 const fmt = n => Math.round(n);
 let D = null; // Wizard-Entwurf
 let N = null; // Ernährungs-Entwurf
@@ -105,7 +113,7 @@ function home() {
   const w = curWeek(), si = nextSession(w), k = todayK(), qs = questsFor(k), done = qs.filter(q => q.done).length;
   const wk = S.plan.weeks[w - 1], r = S.reports[0];
   let next = '<div class="card">Plan abgeschlossen! Unter „Plan“ kannst du einen neuen Zyklus starten.</div>';
-  if (si != null) { const s = wk.sessions[si]; next = `<div class="card glow"><small class="mut">Nächste Quest · Woche ${w}</small><h3>${s.name}: ${s.focus}</h3><p class="mut">${s.items.length} Übungen · ca. ${s.est} Min.</p><button class="btn" data-a="open" data-w="${w}" data-s="${si}">Quest starten</button></div>`; }
+  if (si != null) { const s = wk.sessions[si]; next = `<div class="card glow"><small class="mut">Nächste Quest · Woche ${w}</small><h3>${sdl(w, si)} · ${s.name}: ${s.focus}</h3><p class="mut">${s.items.length} Übungen · ca. ${s.est} Min.</p><button class="btn" data-a="open" data-w="${w}" data-s="${si}">Quest starten</button></div>`; }
   const t = S.nut && targets(), f = dayTot(k);
   return `<main>${isRestDay(k) ? '<div class="sys"><div class="sys-t">[SYSTEM]</div>Heute ist Ruhetag. Erholung ist Teil des Trainings.</div>' : ''}${next}${bossBar(w)}
   <div class="card"><h3>Tägliche Quests <small>${done}/${qs.length} · ${done >= 3 ? '✔ Streak-Tag gesichert' : 'min. 3 für Streak'}</small></h3>${qs.map(q => `<div class="q ${q.done ? 'ok' : ''}" ${q.manual ? `data-a="qtog" data-id="${q.id}"` : ''}><span>${q.done ? '✔' : '○'}</span>${q.label}${q.manual ? ' <small>(tippen)</small>' : ''}</div>`).join('')}<small class="mut">Streak: ${curStreak()} Tage · Bester: ${Math.max(S.hero.best, curStreak())} · Freeze-Tokens: ${S.hero.freeze}</small></div>
@@ -122,11 +130,11 @@ function train() {
   if (S.ui.sess) return sessionV();
   const w = S.ui.viewW || curWeek(), wk = S.plan.weeks[w - 1];
   return `<main><div class="rowc"><button class="btn sm ghost" data-a="vw" data-d="-1">‹</button><h2>Woche ${w}/${S.plan.weeks.length} <small>${wk.label}</small></h2><button class="btn sm ghost" data-a="vw" data-d="1">›</button></div>${bossBar(w)}
-  ${wk.sessions.map((s, i) => { const L = (S.logs[w] || {})[i]; return `<div class="card sess ${L && L.done ? 'done' : ''}"><div><h3>${s.name}: ${s.focus}</h3><small class="mut">${L && L.done ? '✔ erledigt ' + L.date : L && L.skipped ? 'übersprungen' : s.items.length + ' Übungen · ca. ' + s.est + ' Min.'}${s.over ? ' · ⚠ knapp im Zeitbudget' : ''}</small></div><button class="btn sm" data-a="open" data-w="${w}" data-s="${i}">${L && L.done ? 'Ansehen' : 'Öffnen'}</button></div>`; }).join('')}</main>`;
+  ${wk.sessions.map((s, i) => { const L = (S.logs[w] || {})[i]; return `<div class="card sess ${L && L.done ? 'done' : ''}"><div><h3>${sdl(w, i)} · ${s.name}: ${s.focus}</h3><small class="mut">${L && L.done ? '✔ erledigt ' + L.date : L && L.skipped ? 'übersprungen' : s.items.length + ' Übungen · ca. ' + s.est + ' Min.'}${s.over ? ' · ⚠ knapp im Zeitbudget' : ''}</small></div><button class="btn sm" data-a="open" data-w="${w}" data-s="${i}">${L && L.done ? 'Ansehen' : 'Öffnen'}</button></div>`; }).join('')}</main>`;
 }
 function sessionV() {
   const { w, s } = S.ui.sess, ses = S.plan.weeks[w - 1].sessions[s], L = initLog(w, s), ro = L.done;
-  return `<main><button class="btn sm ghost" data-a="close">‹ Zurück</button><h2>${ses.name}: ${ses.focus}</h2>
+  return `<main><button class="btn sm ghost" data-a="close">‹ Zurück</button><h2>${sdl(w, s)} · ${ses.name}: ${ses.focus}</h2>
   ${ses.items.map((it, ii) => {
     const ps = itemSets(it, w), li = L.items[ii], e = EX[it.ex];
     const desc = it.role === 'main' ? `${it.top ? 'Top-Set + Back-off' : 'Gerade Sätze'} · Ziel ${it.reps} Wdh @ RPE ${it.rpe}` : `${it.sets} × ${it.rep ? it.rep[0] + '–' + it.rep[1] : it.reps} Wdh @ RPE ${it.rpe}`;
@@ -146,7 +154,7 @@ function planV() {
   return `<main><h2>Dein Plan</h2>${p.notes.map(n => `<div class="sys warn">⚠ ${n}</div>`).join('')}
   <div class="card"><h4>Geschätzte Maxima (e1RM)</h4><div class="grid3">${['S', 'B', 'D'].map(l => `<div class="stat"><b>${r1(S.e1[l])}</b><small>${LIFTS[l]}</small></div>`).join('')}</div><small class="mut">Σ ${r1(S.e1.S + S.e1.B + S.e1.D)} kg · wird nach jeder Woche anhand deiner Ist-Leistung neu kalibriert.</small></div>
   <div class="card"><h4>Wochenanalysen</h4>${S.reports.length ? S.reports.map(r => `<details><summary>Woche ${r.week} · Umsetzung ${r.compliance}%</summary>${r.lines.map(l => `<p>${l}</p>`).join('')}${r.changes.map(l => `<p class="chg">➜ ${l}</p>`).join('')}</details>`).join('') : '<p class="mut">Nach der ersten vollständig eingetragenen Woche erscheint hier die Auswertung samt Anpassungen.</p>'}</div>
-  ${p.weeks.map(wk => `<details ${wk.n === w0 ? 'open' : ''}><summary class="wsum"><b>W${wk.n}</b> ${wk.label} ${wk.n < w0 ? '✔' : ''}${(S.mods[wk.n] || {}).deload ? ' · Auto-Deload' : ''}</summary>${wk.sessions.map(s => `<div class="card slim"><b>${s.name}</b> · ${s.focus} <small class="mut">~${s.est} Min.</small>${s.items.map(it => { const ps = itemSets(it, wk.n), p0 = ps[0], ld = plannedLoad(it, p0); return `<div class="pi"><span>${EX[it.ex].n}</span><span>${ps.length}×${it.role === 'main' ? it.reps : it.rep ? it.rep.join('–') : it.reps} @${it.rpe}${ld ? ' · ' + ld + ' kg' : ''}</span></div>`; }).join('')}</div>`).join('')}</details>`).join('')}
+  ${p.weeks.map(wk => `<details ${wk.n === w0 ? 'open' : ''}><summary class="wsum"><b>W${wk.n}</b> ${wk.label} ${wk.n < w0 ? '✔' : ''}${(S.mods[wk.n] || {}).deload ? ' · Auto-Deload' : ''}</summary>${wk.sessions.map((s, si) => `<div class="card slim"><b>${sdl(wk.n, si)}</b> · ${s.name}: ${s.focus} <small class="mut">~${s.est} Min.</small>${s.items.map(it => { const ps = itemSets(it, wk.n), p0 = ps[0], ld = plannedLoad(it, p0); return `<div class="pi"><span>${EX[it.ex].n}</span><span>${ps.length}×${it.role === 'main' ? it.reps : it.rep ? it.rep.join('–') : it.reps} @${it.rpe}${ld ? ' · ' + ld + ' kg' : ''}</span></div>`; }).join('')}</div>`).join('')}</details>`).join('')}
   <div class="card"><button class="btn ghost" data-a="newplan">Plan neu erstellen (Fragebogen)</button></div></main>`;
 }
 
@@ -198,6 +206,7 @@ function heroV() {
   <div class="card"><h4>Stats</h4>${stats.map(([n, v]) => `<div class="mb"><span>${n}</span><div class="bar"><i style="width:${v}%"></i></div><b>${fmt(v)}</b></div>`).join('')}</div>
   <div class="card"><h4>Schatten-Armee <small class="mut">${Object.keys(h.unlocked).length}/${CHARS.length}</small></h4><div class="army">${CHARS.map(c => { const u = h.unlocked[c.id]; return `<div class="ch ${u ? '' : 'locked'}" data-a="chinfo" data-id="${c.id}">${figure(c, !u)}<b>${u ? c.n : '???'}</b><small>${u ? c.rar : c.need ? `Streak ${c.need}` : 'Spezial'}</small></div>`; }).join('')}</div></div>
   <div class="card"><h4>Abzeichen</h4><div class="chips">${Object.entries(BADGES).map(([k, [n, d]]) => `<span class="chip ${h.badges[k] ? 'sel' : 'off'}" title="${d}">${h.badges[k] ? '🏅' : '🔒'} ${n}</span>`).join('')}</div></div>
+  <div class="card"><h4>☁ Geräte-Sync (Handy ↔ PC)</h4>${S.sync.gistId ? `<p>✔ Verbunden${S.sync.last ? ' · zuletzt ' + new Date(S.sync.last).toLocaleString('de-DE') : ''}</p><div class="nav"><button class="btn sm" data-a="syncnow">Jetzt synchronisieren</button><button class="btn sm ghost danger" data-a="syncoff">Trennen</button></div>` : `<ol class="mut"><li>Auf github.com einen Token erzeugen: <a href="https://github.com/settings/tokens/new?scopes=gist&description=Iron%20Ascent" target="_blank" rel="noopener">Token-Seite öffnen</a> (nur Haken bei „gist“, Laufzeit nach Wunsch).</li><li>Token unten einfügen und verbinden.</li><li>Auf dem zweiten Gerät dasselbe mit <b>demselben GitHub-Konto</b>.</li></ol><label class="f"><span>GitHub-Token</span><input id="stoken" type="password" placeholder="ghp_…" autocomplete="off"></label><button class="btn sm" data-a="syncon">Verbinden</button>`}${S.ui.syncMsg ? `<p class="chg">${esc(S.ui.syncMsg)}</p>` : ''}<small class="mut">Daten liegen in einem privaten Gist deines Kontos. Token und API-Key bleiben nur auf dem jeweiligen Gerät.</small></div>
   <div class="card"><h4>KI-Scan & Daten</h4><label class="f"><span>Anthropic-API-Key (nur lokal gespeichert, für Foto-Scan)</span><input id="apikey" type="password" value="${esc(S.set.key)}" placeholder="sk-ant-…"></label><div class="nav"><button class="btn sm" data-a="savekey">Key speichern</button><button class="btn sm ghost" data-a="export">Export</button><label class="btn sm ghost">Import<input type="file" id="imp" accept=".json" hidden></label></div><button class="btn sm ghost danger" data-a="reset">Alles zurücksetzen</button></div></main>`;
 }
 
@@ -345,6 +354,9 @@ const ACT = {
     S.ui.sess = null; render();
   },
   mclose: () => { modal(''); render(); },
+  syncon: () => { const t = $('#stoken').value.trim(); if (!t) return; S.sync.token = t; S.sync.gistId = ''; save(true); syncNow(true); },
+  syncnow: () => syncNow(true),
+  syncoff: () => { if (confirm('Sync trennen? Die Daten bleiben auf diesem Gerät und in der Cloud.')) { S.sync = { token: '', gistId: '', base: 0 }; S.ui.syncMsg = ''; save(true); render(); } },
   csend: () => { const t = $('#cin').value.trim(); if (t && !S.ui.cbusy) coachSend(t); },
   cclear: () => { if (confirm('Chat leeren?')) { S.coach.msgs = []; save(); render(); } },
   capply: el => { const m = S.coach.msgs[+el.dataset.i]; if (!m || !m.act || m.done) return; m.act.forEach(applyAct); m.done = true; save(); render(); },
