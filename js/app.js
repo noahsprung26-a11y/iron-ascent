@@ -41,7 +41,8 @@ function figure(c, locked) {
 // ---------- Rendering ----------
 function render() {
   rollStreak();
-  const h = !S.profile ? wizard() : header() + ({ home, train, plan: planV, nutri, hero: heroV }[S.ui.tab] || home)() + tabbar();
+  S.coach = S.coach || { msgs: [] };
+  const h = !S.profile ? wizard() : header() + ({ home, train, plan: planV, nutri, coach: coachV, hero: heroV }[S.ui.tab] || home)() + tabbar();
   $('#app').innerHTML = h;
   flushToasts();
 }
@@ -49,7 +50,7 @@ function flushToasts() {
   while (toastQ.length) { const m = toastQ.shift(), d = document.createElement('div'); d.className = 'toast'; d.textContent = '[SYSTEM] ' + m; $('#toasts').appendChild(d); setTimeout(() => d.remove(), 5000); }
 }
 function tabbar() {
-  const t = [['home', '⚔', 'Quest'], ['train', '🏋', 'Training'], ['plan', '📅', 'Plan'], ['nutri', '🍽', 'Essen'], ['hero', '👤', 'Hunter']];
+  const t = [['home', '⚔', 'Quest'], ['train', '🏋', 'Training'], ['plan', '📅', 'Plan'], ['nutri', '🍽', 'Essen'], ['coach', '🤖', 'Coach'], ['hero', '👤', 'Hunter']];
   return `<nav class="tabs">${t.map(([k, i, l]) => `<button data-a="tab" data-v="${k}" class="${S.ui.tab === k ? 'on' : ''}"><i>${i}</i>${l}</button>`).join('')}</nav>`;
 }
 function header() {
@@ -248,6 +249,75 @@ async function aiScan(file) {
   } catch (e) { out.innerHTML = `<p class="chg">Fehler: ${esc(e.message)}. Prüfe API-Key und Internet.</p>`; }
 }
 
+// ---------- KI-Coach ----------
+const COACH_SYS = `Du bist "Coach", ein erfahrener, evidenzbasierter Powerlifting-Coach in der App Iron Ascent. Antworte auf Deutsch, knapp, konkret und motivierend (leicht im Stil eines Solo-Leveling-Systems, aber nie albern). Nutze den Kontext (Profil, Plan, Logs, Analysen). Du stellst keine medizinischen Diagnosen; bei starken oder anhaltenden Schmerzen verweist du auf Arzt/Physio. Bei Videos siehst du nur einzelne Standbilder: sag klar, was du erkennen kannst und was nicht (z. B. Geschwindigkeit, Tempo), und gib 2-3 priorisierte Korrekturen mit passenden Cues und Übungen.
+Wenn eine Planänderung sinnvoll ist, erkläre sie kurz und hänge am ENDE genau EINEN Codeblock an:
+\`\`\`action
+[{"type":"mods","week":<Woche>,"S":-1,"B":0,"D":0,"all":0,"deload":false},{"type":"injury","area":"shoulder|elbow|wrist|back|hip|knee","sev":1-3},{"type":"e1","lift":"S|B|D","value":<kg>},{"type":"kcal","delta":<-300..300>}]
+\`\`\`
+Nutze nur die benötigten Einträge. mods = Satz-Anpassung (−2..+1) für die genannte Woche. Der Nutzer muss jede Änderung selbst bestätigen.`;
+function coachCtx() {
+  const w = curWeek(), wk = S.plan.weeks[w - 1], si = nextSession(w), t = S.nut ? targets() : null;
+  return JSON.stringify({
+    heute: todayK(), profil: { geschlecht: S.profile.sex, alter: S.profile.age, gewicht: lastWeight(), stufe: S.profile.exp, ziel: S.profile.goal, wettkampf: S.profile.compDate || null, tage: S.profile.days.length, minuten: S.profile.minutes, schwach: S.profile.weak, verletzungen: S.profile.injuries },
+    e1rm: S.e1, woche: w, phase: wk.label, naechste_einheit: si == null ? null : wk.sessions[si].items.map(it => `${EX[it.ex].n} ${it.sets}x${it.reps}@${it.rpe}`),
+    letzte_analysen: S.reports.slice(0, 2).map(r => ({ w: r.week, umsetzung: r.compliance, aenderungen: r.changes })), mods: S.mods[w + 1] || null,
+    ernaehrung: t ? { kcal: t.kcal, p: t.p, c: t.c, f: t.f } : null, gewicht_verlauf: S.weights.slice(-6).map(x => x.kg)
+  });
+}
+async function callClaude(msgs, sys) {
+  const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': S.set.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 1600, system: sys, messages: msgs }) });
+  const j = await r.json(); if (!r.ok) throw new Error(j.error && j.error.message || r.status);
+  return j.content.map(c => c.text || '').join('');
+}
+const mdLite = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+function coachV() {
+  const m = S.coach.msgs, busy = S.ui.cbusy;
+  return `<main class="coach"><h2>🤖 Coach</h2>${S.set.key ? '' : '<div class="sys warn">Zuerst unter „Hunter“ deinen Anthropic-API-Key eintragen.</div>'}
+  <div class="chat">${m.length ? m.map((x, i) => `<div class="msg ${x.r}">${mdLite(x.t)}${x.act && !x.done ? `<div class="act"><b>Vorschlag:</b><br>${x.act.map(a => '• ' + actText(a)).join('<br>')}<br><button class="btn sm" data-a="capply" data-i="${i}">Übernehmen</button></div>` : ''}${x.done ? '<div class="act ok">✔ übernommen</div>' : ''}</div>`).join('') : '<p class="mut">Frag mich alles zu Training, Technik, Plan oder Ernährung. Ich kenne deinen Plan und deine Logs. Für eine Technik-Analyse lade ein Video hoch.</p>'}${busy ? '<div class="msg assistant">⏳ Das System denkt nach…</div>' : ''}</div>
+  <div class="card"><div class="grid2">${sel('cl', 'Video: Übung', [['Kniebeuge', 'Kniebeuge'], ['Bankdrücken', 'Bankdrücken'], ['Kreuzheben', 'Kreuzheben'], ['andere Übung', 'Andere']], S.ui, false).replace('data-b="cl"', 'id="cl"')}<label class="f"><span>Video analysieren</span><span class="btn sm">🎥 Video wählen<input type="file" id="cvid" accept="video/*" hidden></span></label></div><small class="mut">Aufnahme von der Seite (oder 45°), ganzer Körper und Stange im Bild, ein Satz. Es werden 8 Standbilder ausgewertet, die Auswertung ist also eine Einschätzung und kein Ersatz für einen Live-Coach.</small></div>
+  <div class="chatin"><textarea id="cin" rows="2" placeholder="Nachricht an den Coach…"></textarea><button class="btn" data-a="csend">Senden</button></div>${m.length ? '<button class="btn sm ghost" data-a="cclear">Chat leeren</button>' : ''}</main>`;
+}
+function actText(a) {
+  if (a.type === 'mods') return `Woche ${a.week}: ${['S', 'B', 'D'].filter(l => a[l]).map(l => `${LIFTS[l]} ${a[l] > 0 ? '+' : ''}${a[l]} Satz`).join(', ')}${a.all ? ` · alle ${a.all > 0 ? '+' : ''}${a.all}` : ''}${a.deload ? ' · Deload' : ''}`;
+  if (a.type === 'injury') return `Beschwerden: ${AREAS[a.area] || a.area} (Stufe ${a.sev}) – Plan wird angepasst`;
+  if (a.type === 'e1') return `${LIFTS[a.lift]}: geschätztes Max auf ${a.value} kg`;
+  if (a.type === 'kcal') return `Kalorien ${a.delta > 0 ? '+' : ''}${a.delta} kcal`;
+  return 'Unbekannte Aktion';
+}
+function applyAct(a) {
+  const num = (v, lo, hi) => Math.min(hi, Math.max(lo, +v || 0));
+  if (a.type === 'mods') { const wn = num(a.week, curWeek(), S.plan.weeks.length), m = S.mods[wn] = S.mods[wn] || {}; ['S', 'B', 'D'].forEach(l => { if (a[l] != null) m[l] = num(a[l], -2, 1); }); if (a.all != null) m.all = num(a.all, -2, 1); if (a.deload) m.deload = true; }
+  if (a.type === 'injury' && AREAS[a.area]) { const sev = num(a.sev, 1, 3), ex = S.profile.injuries.find(i => i.area === a.area); if (ex) ex.sev = sev; else S.profile.injuries.push({ area: a.area, sev }); const w = curWeek(); rebuildFuture(S.logs[w] && Object.keys(S.logs[w]).length ? w + 1 : w); }
+  if (a.type === 'e1' && S.e1[a.lift]) S.e1[a.lift] = r1(num(a.value, S.e1[a.lift] * .9, S.e1[a.lift] * 1.1));
+  if (a.type === 'kcal' && S.nut) S.nut.adj = (S.nut.adj || 0) + num(a.delta, -300, 300);
+}
+async function coachSend(text, imgs, note) {
+  if (!S.set.key) return alert('Bitte zuerst den API-Key unter „Hunter“ eintragen.');
+  const c = S.coach; c.msgs.push({ r: 'user', t: (note ? `🎥 ${note}\n` : '') + text }); S.ui.cbusy = true; save(); render(); scrollTo(0, 99999);
+  try {
+    let hist = c.msgs.slice(-14).map(m => ({ role: m.r, content: m.t })); while (hist.length && hist[0].role !== 'user') hist.shift();
+    if (imgs) { const last = hist[hist.length - 1]; last.content = [...imgs.map(data => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } })), { type: 'text', text: last.content }]; }
+    const raw = await callClaude(hist, COACH_SYS + '\n\nKONTEXT: ' + coachCtx());
+    const mt = raw.match(/```action\s*([\s\S]*?)```/); let act = null;
+    if (mt) { try { act = JSON.parse(mt[1]); if (!Array.isArray(act)) act = [act]; act = act.filter(a => ['mods', 'injury', 'e1', 'kcal'].includes(a.type)); } catch (e) { } }
+    c.msgs.push({ r: 'assistant', t: raw.replace(/```action[\s\S]*?```/, '').trim(), act: act && act.length ? act : null });
+  } catch (e) { c.msgs.push({ r: 'assistant', t: 'Fehler: ' + e.message + '. Prüfe API-Key und Internetverbindung.' }); }
+  S.ui.cbusy = false; c.msgs = c.msgs.slice(-40); save(); render(); scrollTo(0, 99999);
+}
+async function videoFrames(file, n = 8, max = 768) {
+  const url = URL.createObjectURL(file), v = document.createElement('video'); v.muted = true; v.playsInline = true; v.src = url;
+  await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(new Error('Video konnte nicht gelesen werden')); });
+  const dur = v.duration; if (!isFinite(dur) || dur <= 0) throw new Error('Videolänge unbekannt');
+  const c = document.createElement('canvas'), out = [];
+  for (let i = 0; i < n; i++) {
+    v.currentTime = dur * (i + .5) / n; await new Promise(r => { v.onseeked = r; });
+    const sc = Math.min(1, max / Math.max(v.videoWidth, v.videoHeight)); c.width = v.videoWidth * sc; c.height = v.videoHeight * sc;
+    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); out.push(c.toDataURL('image/jpeg', .8).split(',')[1]);
+  }
+  URL.revokeObjectURL(url); return out;
+}
+
 // ---------- Timer ----------
 let restEnd = 0;
 setInterval(() => { const t = $('#timer'); if (!t) return; const s = Math.round((restEnd - Date.now()) / 1000); if (s > 0) { t.hidden = false; t.textContent = `⏱ Pause ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; } else t.hidden = true; }, 500);
@@ -275,6 +345,9 @@ const ACT = {
     S.ui.sess = null; render();
   },
   mclose: () => { modal(''); render(); },
+  csend: () => { const t = $('#cin').value.trim(); if (t && !S.ui.cbusy) coachSend(t); },
+  cclear: () => { if (confirm('Chat leeren?')) { S.coach.msgs = []; save(); render(); } },
+  capply: el => { const m = S.coach.msgs[+el.dataset.i]; if (!m || !m.act || m.done) return; m.act.forEach(applyAct); m.done = true; save(); render(); },
   qtog: el => { const k = todayK(), q = S.hero.quests[k] = S.hero.quests[k] || {}; q[el.dataset.id] = !q[el.dataset.id]; if (q[el.dataset.id]) addXP(30); checkUnlocks(); save(); render(); },
   newplan: () => { if (!confirm('Neuen Plan erstellen? Aktueller Plan und Logs gehen verloren (Hunter-Fortschritt bleibt).')) return; S.profile = null; S.plan = null; S.ui = { tab: 'home' }; D = null; save(); render(); },
   nutsave: () => { S.nut = { ...N, adj: 0 }; S.ui.nutDraft = null; N = null; save(); render(); },
@@ -319,6 +392,11 @@ document.addEventListener('change', e => {
     const [ii, k, f] = t.dataset.l.split(','), { w, s } = S.ui.sess; S.logs[w][s].items[+ii].sets[+k][f] = +t.value; save();
   } else if (t.dataset.ai) { const i = S.ui.ai[+t.dataset.ai], g = +t.value, x = g / i.g; ['k', 'p', 'c', 'f'].forEach(m => i[m] *= x); i.g = g; }
   else if (t.id === 'aiimg' && t.files[0]) aiScan(t.files[0]);
+  else if (t.id === 'cl') S.ui.cl = t.value;
+  else if (t.id === 'cvid' && t.files[0]) {
+    const f = t.files[0], lift = S.ui.cl || 'Kniebeuge', q = ($('#cin').value || '').trim();
+    videoFrames(f).then(fr => coachSend(q || `Bitte analysiere meine Technik bei dieser ${lift}. Was läuft gut, was sollte ich zuerst korrigieren?`, fr, `Video: ${lift} (${fr.length} Standbilder)`)).catch(e => alert('Video-Fehler: ' + e.message));
+  }
   else if (t.id === 'imp' && t.files[0]) t.files[0].text().then(tx => { try { localStorage.setItem(KEY, JSON.stringify(JSON.parse(tx))); location.reload(); } catch (e) { alert('Ungültige Datei'); } });
 });
 document.addEventListener('input', e => { if (e.target.id === 'fq') fsearch(e.target.value); });
