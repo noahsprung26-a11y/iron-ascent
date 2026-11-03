@@ -50,7 +50,7 @@ function figure(c, locked) {
 function render() {
   rollStreak();
   S.coach = S.coach || { msgs: [] };
-  const h = !S.profile ? wizard() : header() + ({ home, train, plan: planV, nutri, coach: coachV, hero: heroV }[S.ui.tab] || home)() + tabbar();
+  const h = !S.profile ? wizard() : header() + ({ home, train, plan: planV, nutri, coach: coachV, prog: progV, hero: heroV }[S.ui.tab] || home)() + tabbar();
   $('#app').innerHTML = h;
   flushToasts();
 }
@@ -58,7 +58,7 @@ function flushToasts() {
   while (toastQ.length) { const m = toastQ.shift(), d = document.createElement('div'); d.className = 'toast'; d.textContent = '[SYSTEM] ' + m; $('#toasts').appendChild(d); setTimeout(() => d.remove(), 5000); }
 }
 function tabbar() {
-  const t = [['home', '⚔', 'Quest'], ['train', '🏋', 'Training'], ['plan', '📅', 'Plan'], ['nutri', '🍽', 'Essen'], ['coach', '🤖', 'Coach'], ['hero', '👤', 'Hunter']];
+  const t = [['home', '⚔', 'Quest'], ['train', '🏋', 'Training'], ['plan', '📅', 'Plan'], ['nutri', '🍽', 'Essen'], ['coach', '🤖', 'Coach'], ['prog', '📈', 'Progress'], ['hero', '👤', 'Hunter']];
   return `<nav class="tabs">${t.map(([k, i, l]) => `<button data-a="tab" data-v="${k}" class="${S.ui.tab === k ? 'on' : ''}"><i>${i}</i>${l}</button>`).join('')}</nav>`;
 }
 function header() {
@@ -333,6 +333,7 @@ setInterval(() => { const t = $('#timer'); if (!t) return; const s = Math.round(
 
 // ---------- Aktionen ----------
 const ACT = {
+  pper: el => { S.ui.pp = el.dataset.v; save(true); render(); },
   tab: el => { S.ui.tab = el.dataset.v; S.ui.sess = null; save(); render(); },
   wnext: () => { const e = wizardValid(); if (e) return alert(e); if (S.ui.step === 7) { createProfile(); return render(); } S.ui.step = (S.ui.step || 0) + 1; S.ui.draft = D; render(); scrollTo(0, 0); },
   wback: () => { S.ui.step--; render(); },
